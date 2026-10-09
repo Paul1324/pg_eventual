@@ -1,0 +1,7 @@
+comment = 'pg_eventual: asynchronously computed derived columns'
+default_version = '@CARGO_VERSION@'
+module_pathname = 'pg_eventual'
+relocatable = false
+superuser = true
+trusted = false
+schema = eventual

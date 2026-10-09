@@ -1,0 +1,37 @@
+{
+  "settings": {
+    "eventual.batch_size": "8",
+    "eventual.database": "eventual_dev",
+    "eventual.http_timeout_ms": "30000",
+    "eventual.poll_interval_ms": "1000",
+    "eventual.retry_base_ms": "200",
+    "eventual.role": "",
+    "eventual.triton_url": "http://localhost:8000",
+    "eventual.trust_inserted_values": "off",
+    "eventual.workers": "2"
+  },
+  "enqueue": {
+    "rows": 5000,
+    "plain_s": 0.028606597000361944,
+    "derived_s": 0.5599577419998241,
+    "overhead_us_per_row": 106.27022899989242
+  },
+  "sql_throughput": {
+    "rows": 5000,
+    "workers": 2,
+    "seconds": 6.9493390190000355,
+    "rows_per_s": 719.492887932163
+  },
+  "latency": {
+    "samples": 30,
+    "p50_ms": 12.753440500091529,
+    "p95_ms": 18.896187000791542,
+    "max_ms": 27.523992000169528
+  },
+  "embedding_throughput": {
+    "rows": 1000,
+    "seconds": 7.838033784999425,
+    "rows_per_s": 127.58301730133118,
+    "not_done": 0
+  }
+}

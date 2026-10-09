@@ -1,0 +1,149 @@
+pg_eventual demo (2026-10-06 22:05)
+PostgreSQL 18.6 on .state/pg/socket
+
+=== 1. Processors: named, reusable computations ===================================
+    name    |  kind  | input_types |   result_type    |       defaults       
+------------+--------+-------------+------------------+----------------------
+ word_count | sql    | {text}      | integer          | {}
+ l2_norm    | sql    | {real[]}    | double precision | {}
+ fragile    | sql    | {text}      | text             | {}
+ embed_text | triton | {text}      | real[]           | {"normalize": false}
+
+
+=== 2. Declare derived columns inside CREATE TABLE ================================
+The declarations became ordinary typed columns:
+ column_name |       type       
+-------------+------------------
+ id          | bigint
+ title       | text
+ body        | text
+ words       | integer
+ embedding   | real[]
+ raw         | real[]
+ raw_norm    | double precision
+ summary     | text
+
+ column_name | processor  |  kind  | inputs  |   effective_params   | depth 
+-------------+------------+--------+---------+----------------------+-------
+ embedding   | embed_text | triton | {body}  | {"normalize": true}  |     0
+ raw         | embed_text | triton | {body}  | {"normalize": false} |     0
+ summary     | fragile    | sql    | {title} | {}                   |     0
+ words       | word_count | sql    | {body}  | {}                   |     0
+ raw_norm    | l2_norm    | sql    | {raw}   | {}                   |     1
+
+
+=== 3. INSERT returns immediately; values are computed in the background =========
+Time: 7.103 ms
+ id |  title  | words | emb_null | raw_norm | summary 
+----+---------+-------+----------+----------+---------
+  1 | Workers |       | t        |          | 
+  2 | GPUs    |       | t        |          | 
+  3 | Cats    |       | t        |          | 
+
+ column_name | states  
+-------------+---------
+ embedding   | pending
+ raw         | pending
+ raw_norm    | waiting
+ summary     | pending
+ words       | pending
+
+
+=== 4. ...a moment later ===========================================================
+ settled 
+---------
+ t
+
+ id |  title  | words | dims | unit_norm | raw_norm | summary 
+----+---------+-------+------+-----------+----------+---------
+  1 | Workers |     7 |  384 |    1.0000 |    4.671 | WORKERS
+  2 | GPUs    |     8 |  384 |    1.0000 |    5.952 | GPUS
+  3 | Cats    |     6 |  384 |    1.0000 |    6.022 | CATS
+
+Cosine similarity of the normalized embeddings (plain SQL):
+    a    |  b   | cosine 
+---------+------+--------
+ Workers | GPUs |  0.115
+ Workers | Cats |  0.061
+ GPUs    | Cats |  0.044
+
+
+=== 5. UPDATE invalidates the row's dependent values and recomputes them =========
+ title | words | emb_null | raw_null | norm_null 
+-------+-------+----------+----------+-----------
+ Cats  |       | t        | t        | t
+
+ settled 
+---------
+ t
+
+ title | words | dims | raw_norm 
+-------+-------+------+----------
+ Cats  |     9 |  384 |    5.910
+
+ column_name | generation | state 
+-------------+------------+-------
+ embedding   |          2 | done
+ raw         |          2 | done
+ raw_norm    |          4 | done
+ summary     |          1 | done
+ words       |          2 | done
+
+
+=== 6. Guard rails ================================================================
+-- writing a derived column directly:
+psql:demo/demo.sql:96: ERROR:  column "words" is derived by pg_eventual and cannot be updated directly
+-- a declaration that names a missing column:
+psql:demo/demo.sql:98: ERROR:  column "bodyy" used by derived column "n" does not exist in demo.bad1
+-- a dependency cycle:
+psql:demo/demo.sql:100: ERROR:  derived columns of demo.bad2 form a dependency cycle involving: a, b
+-- an unknown processor parameter:
+psql:demo/demo.sql:102: ERROR:  unknown processor parameter "normalise" (supported: normalize)
+-- dropping an input column that a derived column uses:
+psql:demo/demo.sql:104: ERROR:  cannot drop column(s) used by derived columns: demo.articles.body (input of words), demo.articles.body (input of embedding), demo.articles.body (input of raw)
+
+=== 7. Failures are recorded and retried; fixing the input recovers ===============
+ settled 
+---------
+ t
+
+ column_name | state  | attempts |           last_error            
+-------------+--------+----------+---------------------------------
+ summary     | failed |        2 | cannot summarize "Error report"
+
+ settled 
+---------
+ t
+
+      title      |   summary    
+-----------------+--------------
+ Incident report | INCIDENT REP
+
+
+=== 8. Observability ===============================================================
+ column_name | state |         model          | version |        params        | batch |  ms  
+-------------+-------+------------------------+---------+----------------------+-------+------
+ embedding   | done  | eventual_text_embedder | 1       | {"normalize": true}  | 2     | 34.7
+ raw         | done  | eventual_text_embedder | 1       | {"normalize": false} |       | 19.2
+ raw_norm    | done  |                        |         | {}                   |       |  1.6
+ summary     | done  |                        |         | {}                   | 2     |  3.4
+ words       | done  |                        |         | {}                   | 2     |  6.1
+
+ column_name | processor  | waiting | pending | running | done | failed 
+-------------+------------+---------+---------+---------+------+--------
+ embedding   | embed_text |       0 |       0 |       0 |    4 |      0
+ raw         | embed_text |       0 |       0 |       0 |    4 |      0
+ raw_norm    | l2_norm    |       0 |       0 |       0 |    4 |      0
+ summary     | fragile    |       0 |       0 |       0 |    4 |      0
+ words       | word_count |       0 |       0 |       0 |    4 |      0
+
+ worker_index |  state  | processed | failed 
+--------------+---------+-----------+--------
+            0 | running |         0 |      0
+            1 | running |         0 |      0
+
+
+=== 9. Independent check: Triton pipeline vs sentence-transformers on CPU =========
+tokenizer: 8 texts match Hugging Face ids
+normalize=True: max|diff|=2.16e-04 min cosine=0.99999911 norms=[1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+normalize=False: max|diff|=1.37e-03 min cosine=0.99999917 norms=[5.727399826049805, 4.67140007019043, 5.507599830627441, 4.326700210571289, 3.194000005722046, 5.298099994659424, 6.303100109100342, 6.401700019836426]

@@ -1,0 +1,30 @@
+name: "eventual_text_embedder"
+platform: "ensemble"
+max_batch_size: 0
+input [
+  { name: "TEXT" data_type: TYPE_STRING dims: [-1] },
+  { name: "NORMALIZE" data_type: TYPE_BOOL dims: [1] }
+]
+output [{ name: "EMBEDDING" data_type: TYPE_FP32 dims: [-1, 384] }]
+version_policy { specific { versions: [1] } }
+ensemble_scheduling {
+  step [
+    {
+      model_name: "eventual_wordpiece"
+      model_version: 1
+      input_map { key: "TEXT" value: "TEXT" }
+      output_map { key: "input_ids" value: "ids" }
+      output_map { key: "attention_mask" value: "mask" }
+      output_map { key: "token_type_ids" value: "types" }
+    },
+    {
+      model_name: "eventual_minilm_pooled"
+      model_version: 1
+      input_map { key: "input_ids" value: "ids" }
+      input_map { key: "attention_mask" value: "mask" }
+      input_map { key: "token_type_ids" value: "types" }
+      input_map { key: "NORMALIZE" value: "NORMALIZE" }
+      output_map { key: "EMBEDDING" value: "EMBEDDING" }
+    }
+  ]
+}
